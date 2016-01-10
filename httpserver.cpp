@@ -5,7 +5,6 @@
 #include <windows.h>
 #include <Wincrypt.h>
 
-
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -17,7 +16,7 @@
 typedef unsigned int uint;
 
 const char* HostAddress = "127.0.0.1";
-const char* DEFAULT_PORT = "9037";
+char* DEFAULT_PORT = "9037";
 
 
 typedef enum {
@@ -43,6 +42,25 @@ WriteFile(char* filename, unsigned char* data, long length)
     FILE *fp = fopen(filename, "w+b");
     fwrite(data, 1, length, fp);
     fclose(fp);
+}
+
+int
+strends(char* longStr, char* endSequence)
+{
+    return strcmp(longStr + (strlen(longStr) - strlen(endSequence)), endSequence) == 0;
+}
+
+void
+strreplace(char* str, char find, char replace)
+{
+    while(*str)
+    {
+        if (*str == find)
+        {
+            *str = replace;
+        }
+        ++str;
+    }
 }
 
 HANDLE ClientListLock;
@@ -135,6 +153,8 @@ ServerStartup()
         printf("Error listening on socket.\n");
         return;
     }
+
+    printf("Listening on port: %s", DEFAULT_PORT);
 }
 
 void
@@ -156,8 +176,11 @@ SOCKET AcceptClient()
     return ClientSocket;
 }
 
-void serveRequest(SOCKET ClientSocket, char* filename, char* contentType, char* contentDisposition)
+void
+ServeRequest(SOCKET ClientSocket, char* filename, char* contentType, char* contentDisposition)
 {
+    strreplace(filename, '/', '\\');
+    
     //respond with the matching file
     char* responseFormat =
         "HTTP/1.1 200 OK\n"
@@ -202,8 +225,12 @@ void serveRequest(SOCKET ClientSocket, char* filename, char* contentType, char* 
         sprintf(responseHeader, responseFormat, contentLength, contentType, contentDispositionHeader);
         
         int headerLength = strlen(responseHeader);
+
+        printf(responseHeader);
+        
         send(ClientSocket, responseHeader, headerLength, 0);
 
+        
         printf("File Size: %d\n", contentLength);
         int sentAmount = 0;
         while (sentAmount < contentLength)
@@ -217,82 +244,48 @@ void serveRequest(SOCKET ClientSocket, char* filename, char* contentType, char* 
 }
 
 void
-servePage(SOCKET ClientSocket, char* filename)
+SendHTML(SOCKET ClientSocket, char* filename)
 {
-    //respond with the matching file
-    char* responseFormat =
-        "HTTP/1.1 200 OK\n"
-        "Content-length: %d\n"
-        "Content-Type: %s\n\n";
-    char responseHeader[BUFSIZ];
-
-    if (strcmp(filename, "") == 0)
-    {
-        filename = "index.html";
-    }
-    
-    printf("Sending: %s", filename);
-    FILE* contentFile = fopen(filename, "r");
-    if (contentFile == 0)
-    {
-        //404
-        printf("404: file not found");
-    }
-    else
-    {
-        char* contentType = "text/html";
-        LARGE_INTEGER fileSize;
-        GetFileSizeEx(contentFile, &fileSize);
-
-        int contentLength = fileSize.LowPart;
-        char* content = (char*)malloc(sizeof(char)*contentLength);
-        fread(content, 1, contentLength, contentFile);
-    
-        sprintf(responseHeader, responseFormat, contentLength, contentType);
-        int headerLength = strlen(responseHeader);
-        send(ClientSocket, responseHeader, headerLength, 0);
-
-        int sentAmount = 0;
-        while (sentAmount < contentLength)
-        {
-            sentAmount += send(ClientSocket,
-                               content+sentAmount,
-                               contentLength-sentAmount, 0);
-            
-        }
-    }
+    ServeRequest(ClientSocket, filename, "text/html; charset=UTF-8", 0);
 }
 
 void
-sendFile(SOCKET ClientSocket, char* filename)
+SendFile(SOCKET ClientSocket, char* filename)
 {
     char* dispositionFormat = "attachment; filename=%s";
     char disposition[50];
     sprintf(disposition, dispositionFormat, filename);
-    serveRequest(ClientSocket, filename, "application/octet-stream", disposition);
+    ServeRequest(ClientSocket, filename, "application/octet-stream", disposition);
 }
 
 void
-respond(SOCKET ClientSocket, char* Request)
+Respond(SOCKET ClientSocket, char* Request)
 {
     int index = 0;
     char verb[20];
     char path[20];
     char version[20];
-    /*
-    char* RequestCpy;
-    while(Request[index] != '\n' && Request[index++] != 0);
-    RequestCpy = (char*)malloc(sizeof(char)*(index+1));
-    strncpy(RequestCpy, Request, index+1); 
-    */
 
     sscanf(Request, "%s %s %s\n", &verb, &path, &version);
-    printf("%s\n", verb);
-    printf("%s\n", path);
+    printf("Verb: %s\n", verb);
+    printf("Path: %s\n", path);
+    printf("Version: %s\n", version);
 
     if (strcmp("GET", verb) == 0)
     {
-        sendFile(ClientSocket, path+1);
+        //TODO: make this check for a file extension..? like if it's just an empty path return index.html, for now forget about that       
+        if (strlen(path+1) == 0)
+        {
+            SendHTML(ClientSocket, "index.html");
+        }
+        else if (strends(path, ".html"))
+        {
+            SendHTML(ClientSocket, path+1);
+        }
+        else
+        {
+            SendFile(ClientSocket, path+1);
+        }
     }
     //free(RequestCpy);
 }
@@ -300,6 +293,11 @@ respond(SOCKET ClientSocket, char* Request)
 int
 main(int argc, char** argv)
 {
+
+    if (argc > 1)
+    {
+        DEFAULT_PORT = argv[1];
+    }
     ClientListLock = CreateMutex(
         NULL,
         FALSE,
@@ -321,7 +319,7 @@ main(int argc, char** argv)
         memset(responsebuf,0,BUFSIZ);
         int received = recv(ClientSocket, requestbuf, BUFSIZ, 0);
         printf("%s", requestbuf);
-        respond(ClientSocket, requestbuf);
+        Respond(ClientSocket, requestbuf);
         closesocket(ClientSocket);
     }
     
