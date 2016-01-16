@@ -4,6 +4,8 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <Wincrypt.h>
+#include <direct.h>
+#include <errno.h>
 
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -42,6 +44,13 @@ WriteFile(char* filename, unsigned char* data, long length)
     FILE *fp = fopen(filename, "w+b");
     fwrite(data, 1, length, fp);
     fclose(fp);
+}
+
+int LastIndexOf(char* str, char lookingFor)
+{
+    int index = strlen(str);
+    while(*(str + (index--)) != lookingFor || index != 0);
+    return index;
 }
 
 int
@@ -263,10 +272,10 @@ Respond(SOCKET ClientSocket, char* Request)
 {
     int index = 0;
     char verb[20];
-    char path[20];
+    char path[255];
     char version[20];
 
-    sscanf(Request, "%s %s %s\n", &verb, &path, &version);
+    sscanf(Request, "%20s %255s %20s\n", &verb, &path, &version);
     printf("Verb: %s\n", verb);
     printf("Path: %s\n", path);
     printf("Version: %s\n", version);
@@ -293,11 +302,49 @@ Respond(SOCKET ClientSocket, char* Request)
 int
 main(int argc, char** argv)
 {
-
-    if (argc > 1)
+    int argIndex = 1;
+    //
+    while(argIndex < argc)
     {
-        DEFAULT_PORT = argv[1];
+        if (strcmp("-port", argv[argIndex]) == 0)
+        {
+            argIndex += 1;
+            if (argIndex >= argc)
+            {
+                printf("-port value not specified");
+                return 0;
+            }
+            
+            DEFAULT_PORT = argv[argIndex];
+        }
+        else if (strcmp("-path", argv[argIndex]) == 0)
+        {
+            argIndex += 1;
+            if (argIndex >= argc)
+            {
+                printf("-path value not specified");
+                return 0;
+            }
+
+            if (chdir(argv[argIndex]) == 0)
+            {
+            }
+            else
+            {
+                int chdirErrorValue = errno;
+                printf("Problem changing directories: %d", chdirErrorValue);
+                return 0;
+            }
+        }
+        else
+        {
+            printf("Unrecognized flag: %s", argv[argIndex]);
+            return 0;
+        }
+
+        argIndex += 1;
     }
+    
     ClientListLock = CreateMutex(
         NULL,
         FALSE,
