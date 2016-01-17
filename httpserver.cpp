@@ -283,6 +283,7 @@ ServeRequest(SOCKET ClientSocket, char* filename, char* contentType, char* conte
                                content+sentAmount,
                                contentLength, 0);
         }
+        fclose(contentFile);
         free(content);
     }   
 }
