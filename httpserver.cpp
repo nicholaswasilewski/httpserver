@@ -1,17 +1,32 @@
+/*
+  TODO List:
+  work with arbitrarily large header sizes
+  thread for each socket?
+  select and thread the work?
+  non-blocking socket stuff of some sort, at any rate
+*/
+
+
 #include <stdio.h>
 #include <stdlib.h>
+#include <direct.h>
+#include <errno.h>
+#include <string.h>
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <Wincrypt.h>
-#include <direct.h>
-#include <errno.h>
 
 #pragma comment(lib, "wininet.lib")
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
 
-#define IPv4MaxPacketSize 65507
+#if _WIN32
+#define strtok_r strtok_s
+#endif
+
+#define IPv4MaxPacketSize 65535
 
 #define MAX_CLIENTS 4
 
@@ -70,6 +85,26 @@ strreplace(char* str, char find, char replace)
         }
         ++str;
     }
+}
+
+char* PathFilename(char* path, int length)
+{
+    char* cursor = path + length;
+    char backslash = '\\';
+    char forwardslash = '/';
+
+    //walk cursor back from the end until a slash is found
+    while(cursor > path)
+    {
+        if (*cursor == backslash || *cursor == forwardslash)
+        {
+            return cursor+1;
+        }
+        
+        cursor -= 1;
+    }
+
+    return cursor;
 }
 
 HANDLE ClientListLock;
@@ -259,26 +294,38 @@ SendHTML(SOCKET ClientSocket, char* filename)
 }
 
 void
-SendFile(SOCKET ClientSocket, char* filename)
+SendFile(SOCKET ClientSocket, char* filepath)
 {
+    char* filename = PathFilename(filepath, strlen(filepath));
     char* dispositionFormat = "attachment; filename=%s";
-    char disposition[50];
+    char* disposition = (char*)malloc(sizeof(char)*(strlen(dispositionFormat) +
+                                                    strlen(filename) +
+                                                    1));
     sprintf(disposition, dispositionFormat, filename);
-    ServeRequest(ClientSocket, filename, "application/octet-stream", disposition);
+    ServeRequest(ClientSocket, filepath, "application/octet-stream", disposition);
+    free(disposition);
 }
 
 void
 Respond(SOCKET ClientSocket, char* Request)
 {
+    printf("Begin Responding...\n");
+    char* HttpRequest;
     int index = 0;
-    char verb[20];
-    char path[255];
-    char version[20];
+    char *wordEnd, *lineEnd;
+    char* verb;
+    char* path;
+    char* version;
 
-    sscanf(Request, "%20s %255s %20s\n", &verb, &path, &version);
-    printf("Verb: %s\n", verb);
-    printf("Path: %s\n", path);
-    printf("Version: %s\n", version);
+    size_t RequestSize = strlen(Request)+1;
+    HttpRequest = (char*)malloc(sizeof(char)*RequestSize);
+    memcpy(HttpRequest, Request, RequestSize);
+    
+    char* FirstLine = strtok_r(Request, "\n", &lineEnd);
+    
+    verb = strtok_r(FirstLine, " ", &wordEnd);
+    path = strtok_r(0, " ", &wordEnd);
+    version = strtok_r(0, " ", &wordEnd);
 
     if (strcmp("GET", verb) == 0)
     {
@@ -296,7 +343,7 @@ Respond(SOCKET ClientSocket, char* Request)
             SendFile(ClientSocket, path+1);
         }
     }
-    //free(RequestCpy);
+    free(HttpRequest);
 }
 
 int
@@ -311,7 +358,16 @@ main(int argc, char** argv)
             argIndex += 1;
             if (argIndex >= argc)
             {
-                printf("-port value not specified");
+                printf("-port value not specified.\n");
+                return 0;
+            }
+
+            int portNumber = atoi(argv[argIndex]);
+            int MaxPort = 65535;
+
+            if (portNumber < 0 ||portNumber > MaxPort)
+            {
+                printf("Port value out of range.\n");
                 return 0;
             }
             
@@ -322,7 +378,7 @@ main(int argc, char** argv)
             argIndex += 1;
             if (argIndex >= argc)
             {
-                printf("-path value not specified");
+                printf("-path value not specified.\n");
                 return 0;
             }
 
@@ -349,7 +405,8 @@ main(int argc, char** argv)
         NULL,
         FALSE,
         NULL);
-    
+
+    //threads aren't doing anything right now
     HANDLE Threads[MAX_CLIENTS];
     
     ServerStartup();
@@ -358,12 +415,12 @@ main(int argc, char** argv)
     {
         SOCKET ClientSocket = AcceptClient();
         
-        char requestbuf[BUFSIZ];
-        char responsebuf[BUFSIZ];
-        char encoded[BUFSIZ];
+        char requestbuf[BUFSIZ] = {0};
+        char responsebuf[BUFSIZ] = {0};
+        char encoded[BUFSIZ] = {0};
 
-        memset(requestbuf,0,BUFSIZ);
-        memset(responsebuf,0,BUFSIZ);
+        //modify this to accept arbitrary input size
+        //also have a timeout
         int received = recv(ClientSocket, requestbuf, BUFSIZ, 0);
         printf("%s", requestbuf);
         Respond(ClientSocket, requestbuf);
