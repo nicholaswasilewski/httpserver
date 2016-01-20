@@ -4,6 +4,7 @@
   thread for each socket?
   select and thread the work?
   non-blocking socket stuff of some sort, at any rate
+  cgi support
 */
 
 
@@ -26,9 +27,8 @@
 #define strtok_r strtok_s
 #endif
 
+#define MAX_CLIENTS 64
 #define IPv4MaxPacketSize 65535
-
-#define MAX_CLIENTS 4
 
 typedef unsigned int uint;
 
@@ -330,7 +330,9 @@ Respond(SOCKET ClientSocket, char* Request)
 
     if (strcmp("GET", verb) == 0)
     {
-        //TODO: make this check for a file extension..? like if it's just an empty path return index.html, for now forget about that       
+        //TODO: make this check for a file extension..?
+        //TODO: empty path return index.html
+        //TODO: if no index.html put something together
         if (strlen(path+1) == 0)
         {
             SendHTML(ClientSocket, "index.html");
@@ -345,6 +347,27 @@ Respond(SOCKET ClientSocket, char* Request)
         }
     }
     free(HttpRequest);
+}
+
+//TODO: modify this to accept arbitrary input size
+//TODO: also have a timeout for keepalive sessions?
+DWORD ServeSocket(void* ThreadData)
+{
+    socketData* SocketData = (socketData*)ThreadData;
+    SOCKET ClientSocket = SocketData->Socket;
+    char requestbuf[BUFSIZ] = {0};
+    char responsebuf[BUFSIZ] = {0};
+    char encoded[BUFSIZ] = {0};
+
+    //TODO: modify this to accept arbitrary input size
+    //TODO: also have a timeout for keepalive sessions?
+    int received = recv(ClientSocket, requestbuf, BUFSIZ, 0);
+    printf("%s", requestbuf);
+    Respond(ClientSocket, requestbuf);
+    closesocket(ClientSocket);    
+
+    free(SocketData);
+    return 0;
 }
 
 int
@@ -416,16 +439,16 @@ main(int argc, char** argv)
     {
         SOCKET ClientSocket = AcceptClient();
         
-        char requestbuf[BUFSIZ] = {0};
-        char responsebuf[BUFSIZ] = {0};
-        char encoded[BUFSIZ] = {0};
-
-        //modify this to accept arbitrary input size
-        //also have a timeout
-        int received = recv(ClientSocket, requestbuf, BUFSIZ, 0);
-        printf("%s", requestbuf);
-        Respond(ClientSocket, requestbuf);
-        closesocket(ClientSocket);
+        socketData* newThreadData = (socketData*)malloc(sizeof(socketData));
+        newThreadData->Socket = ClientSocket;
+        DWORD ThreadID = 0;
+        CreateThread(0,
+                     0,
+                     ServeSocket,
+                     newThreadData,
+                     0,
+                     &ThreadID);
+                     
     }
     
     ServerDispose();

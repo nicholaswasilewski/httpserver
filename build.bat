@@ -1,8 +1,8 @@
 
 @echo off
 SET CompilerFlags = /O2 /Oi -fp:fast
-SET LinkerFlags = WS2_32.LIB
 
+IF NOT EXIST bin mkdir bin
 pushd bin
-cl %LinkerFlags% ../httpserver.cpp -link %LinkerFlags%
-popd
+cl %CompilerFlags% ..\httpserver.cpp
+popd bin
